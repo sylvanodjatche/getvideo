@@ -1,5 +1,5 @@
 ---
-title: GetVideo - Téléchargeur HD Universel
+title: GetVideo - Telechargeur HD
 emoji: ⚡
 colorFrom: indigo
 colorTo: purple
@@ -8,7 +8,7 @@ sdk_version: 4.44.0
 app_file: app.py
 pinned: false
 license: mit
-short_description: Téléchargeur universel YouTube, TikTok, Instagram et Twitter en HD
+short_description: Telechargeur video et audio HD universel
 ---
 
 # ⚡ GetVideo 2.0 - Téléchargeur & Extracteur Multimédia Universel HD
