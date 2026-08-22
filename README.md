@@ -9,6 +9,7 @@ app_file: app.py
 pinned: false
 license: mit
 short_description: Telechargeur video et audio HD universel
+hardware: cpu-basic
 ---
 
 # ⚡ GetVideo 2.0 - Téléchargeur & Extracteur Multimédia Universel HD
