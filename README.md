@@ -3,13 +3,10 @@ title: GetVideo - Telechargeur HD
 emoji: ⚡
 colorFrom: indigo
 colorTo: purple
-sdk: gradio
-sdk_version: 4.44.0
-app_file: app.py
+sdk: docker
 pinned: false
 license: mit
 short_description: Telechargeur video et audio HD universel
-hardware: cpu-basic
 ---
 
 # ⚡ GetVideo 2.0 - Téléchargeur & Extracteur Multimédia Universel HD

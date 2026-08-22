@@ -1,24 +1,34 @@
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    PORT=7860
 
-WORKDIR /app
-
-# Dépendances système légères
+# Installation de ffmpeg et utilitaires système
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
+    ffmpeg \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Dépendances Python
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Création de l'utilisateur non-root (requis par Hugging Face Spaces)
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
 
-# Copie des sources backend et frontend
-COPY backend/ /app/backend/
-COPY frontend/ /app/frontend/
+WORKDIR $HOME/app
 
-EXPOSE 8000
+# Installation des dépendances Python
+COPY --chown=user backend/requirements.txt requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Lancement de FastAPI
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Copie de tous les fichiers du projet
+COPY --chown=user . $HOME/app
+
+# Port officiel Hugging Face Spaces
+EXPOSE 7860
+
+# Lancement propre de l'application FastAPI
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "7860"]
