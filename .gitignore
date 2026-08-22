@@ -1,0 +1,10 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.so
+.DS_Store
+.idea/
+.vscode/
+data/analytics.db
+data/*.db

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GetVideo - Tableau de Bord & Statistiques d'Audience</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242'/><path d='M12 12v9'/><path d='m8 17 4 4 4-4'/></svg>">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col selection:bg-indigo-500 selection:text-white">
+
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-900/70 backdrop-blur-md sticky top-0 z-40">
+        <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <a href="/" class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                    <i data-lucide="play-circle" class="w-6 h-6 text-white"></i>
+                </a>
+                <div>
+                    <span class="font-black text-lg text-white">GetVideo Analytics</span>
+                    <span class="text-[10px] ml-2 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold uppercase">Live Tracker</span>
+                </div>
+            </div>
+            <div class="flex items-center space-x-3">
+                <button id="refresh-btn" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-all">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                    <span>Actualiser</span>
+                </button>
+                <a href="/" class="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all flex items-center gap-1">
+                    <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+                    <span>Retour au site</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Dashboard -->
+    <main class="flex-1 max-w-6xl w-full mx-auto px-4 py-8">
+        
+        <div class="mb-8">
+            <h1 class="text-3xl font-black text-white mb-2">Tableau de Bord & Impact en Direct</h1>
+            <p class="text-sm text-slate-400">Suivez l'utilisation, la popularité et le volume de données traité par votre application GetVideo en temps réel.</p>
+        </div>
+
+        <!-- Metric KPI Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-8">
+            
+            <!-- Card 1: Analyses -->
+            <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl relative overflow-hidden group">
+                <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <i data-lucide="search" class="w-20 h-20 text-indigo-500"></i>
+                </div>
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Vidéos Analysées</p>
+                <h2 class="text-4xl font-black text-white mb-2" id="stat-analyses">0</h2>
+                <div class="flex items-center gap-1.5 text-xs text-indigo-400 font-medium">
+                    <i data-lucide="trending-up" class="w-4 h-4"></i>
+                    <span>Total des requêtes d'extraction</span>
+                </div>
+            </div>
+
+            <!-- Card 2: Downloads -->
+            <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl relative overflow-hidden group">
+                <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <i data-lucide="download-cloud" class="w-20 h-20 text-emerald-500"></i>
+                </div>
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Téléchargements Réussis</p>
+                <h2 class="text-4xl font-black text-emerald-400 mb-2" id="stat-downloads">0</h2>
+                <div class="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+                    <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+                    <span>Fichiers délivrés aux utilisateurs</span>
+                </div>
+            </div>
+
+            <!-- Card 3: Bandwidth -->
+            <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl relative overflow-hidden group">
+                <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <i data-lucide="activity" class="w-20 h-20 text-violet-500"></i>
+                </div>
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Données Transférées</p>
+                <h2 class="text-4xl font-black text-violet-400 mb-2" id="stat-bandwidth">0 Go</h2>
+                <div class="flex items-center gap-1.5 text-xs text-violet-400 font-medium">
+                    <i data-lucide="zap" class="w-4 h-4"></i>
+                    <span>Bande passante totale économisée</span>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Breakdown Grids -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            <!-- Top Platforms -->
+            <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl">
+                <div class="flex items-center justify-between mb-5">
+                    <h3 class="text-base font-bold text-white flex items-center gap-2">
+                        <i data-lucide="pie-chart" class="w-4 h-4 text-indigo-400"></i>
+                        <span>Top Plateformes Populaires</span>
+                    </h3>
+                </div>
+                <div id="platforms-list" class="space-y-3">
+                    <p class="text-sm text-slate-500 py-4 text-center">Aucune donnée pour le moment.</p>
+                </div>
+            </div>
+
+            <!-- Format Preferences -->
+            <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl">
+                <div class="flex items-center justify-between mb-5">
+                    <h3 class="text-base font-bold text-white flex items-center gap-2">
+                        <i data-lucide="film" class="w-4 h-4 text-purple-400"></i>
+                        <span>Formats Téléchargés (Vidéo vs Audio)</span>
+                    </h3>
+                </div>
+                <div id="formats-list" class="space-y-3">
+                    <p class="text-sm text-slate-500 py-4 text-center">Aucune donnée pour le moment.</p>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800/60 py-6 text-center text-xs text-slate-500 mt-auto">
+        <p>GetVideo Live Analytics • Stockage persistant SQLite sécurisé</p>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.lucide) lucide.createIcons();
+
+            const statAnalyses = document.getElementById('stat-analyses');
+            const statDownloads = document.getElementById('stat-downloads');
+            const statBandwidth = document.getElementById('stat-bandwidth');
+            const platformsList = document.getElementById('platforms-list');
+            const formatsList = document.getElementById('formats-list');
+            const refreshBtn = document.getElementById('refresh-btn');
+
+            async function loadStats() {
+                try {
+                    const res = await fetch('/api/admin/stats');
+                    const data = await res.json();
+
+                    statAnalyses.textContent = data.total_analyses || 0;
+                    statDownloads.textContent = data.total_downloads || 0;
+                    statBandwidth.textContent = `${data.total_gb_transferred || 0} Go`;
+
+                    // Render Platforms
+                    if (data.platforms && data.platforms.length > 0) {
+                        platformsList.innerHTML = '';
+                        const totalPlat = data.platforms.reduce((acc, p) => acc + p.count, 0) || 1;
+                        data.platforms.forEach(p => {
+                            const percent = Math.round((p.count / totalPlat) * 100);
+                            const item = document.createElement('div');
+                            item.className = 'space-y-1';
+                            item.innerHTML = `
+                                <div class="flex justify-between text-xs font-semibold">
+                                    <span class="uppercase text-slate-200">${p.platform}</span>
+                                    <span class="text-slate-400">${p.count} (${percent}%)</span>
+                                </div>
+                                <div class="w-full bg-slate-950 rounded-full h-2.5 overflow-hidden">
+                                    <div class="bg-indigo-500 h-full rounded-full" style="width: ${percent}%"></div>
+                                </div>
+                            `;
+                            platformsList.appendChild(item);
+                        });
+                    }
+
+                    // Render Formats
+                    if (data.formats && data.formats.length > 0) {
+                        formatsList.innerHTML = '';
+                        const totalForm = data.formats.reduce((acc, f) => acc + f.count, 0) || 1;
+                        data.formats.forEach(f => {
+                            const percent = Math.round((f.count / totalForm) * 100);
+                            const item = document.createElement('div');
+                            item.className = 'space-y-1';
+                            item.innerHTML = `
+                                <div class="flex justify-between text-xs font-semibold">
+                                    <span class="uppercase text-slate-200">${f.format_type}</span>
+                                    <span class="text-slate-400">${f.count} (${percent}%)</span>
+                                </div>
+                                <div class="w-full bg-slate-950 rounded-full h-2.5 overflow-hidden">
+                                    <div class="bg-purple-500 h-full rounded-full" style="width: ${percent}%"></div>
+                                </div>
+                            `;
+                            formatsList.appendChild(item);
+                        });
+                    }
+
+                } catch (err) {
+                    console.error('Erreur chargement stats:', err);
+                }
+            }
+
+            loadStats();
+            if (refreshBtn) refreshBtn.addEventListener('click', loadStats);
+        });
+    </script>
+</body>
+</html>

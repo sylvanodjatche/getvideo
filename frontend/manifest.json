@@ -1,0 +1,16 @@
+{
+  "name": "GetVideo - Téléchargeur Multimédia HD",
+  "short_name": "GetVideo",
+  "description": "Téléchargement rapide et sans publicité de vidéos et audios HD (YouTube, TikTok sans filigrane, Instagram, Twitter/X).",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242'/><path d='M12 12v9'/><path d='m8 17 4 4 4-4'/></svg>",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
