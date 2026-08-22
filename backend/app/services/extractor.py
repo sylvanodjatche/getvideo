@@ -49,6 +49,17 @@ class MediaExtractor:
             'no_color': True,
             'writesubtitles': True,
             'writeautomaticsub': True,
+            # Bypasser les blocages anti-bot de datacenter YouTube via les clients mobiles
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['ios', 'android', 'mweb', 'tv'],
+                    'player_skip': ['webpage', 'configs', 'js'],
+                }
+            },
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+                'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+            }
         }
 
     def extract(self, url: str) -> Dict[str, Any]:
@@ -86,12 +97,11 @@ class MediaExtractor:
             if platform == "youtube":
                 max_h = max([f.get("height") or 0 for f in raw_formats if f.get("vcodec") != "none"] or [720])
                 
-                # Bitrates standards moyens en kbps pour estimation précise selon la durée réelle
                 bitrate_map = {
-                    1080: 3200,  # ~3.2 Mbps vidéo + 160 kbps audio
-                    720: 1600,   # ~1.6 Mbps vidéo + 128 kbps audio
-                    480: 850,    # ~850 kbps vidéo + 128 kbps audio
-                    360: 450     # ~450 kbps vidéo + 96 kbps audio
+                    1080: 3200,
+                    720: 1600,
+                    480: 850,
+                    360: 450
                 }
 
                 resolutions = [
@@ -104,16 +114,13 @@ class MediaExtractor:
                 for r in resolutions:
                     h = r["h"]
                     if h <= max_h or h == 360:
-                        # Chercher si yt-dlp fournit la taille exacte du flux
                         matched_format = next((f for f in raw_formats if f.get("height") == h and f.get("vcodec") != "none"), None)
                         exact_size = None
                         if matched_format:
                             exact_size = matched_format.get("filesize") or matched_format.get("filesize_approx")
                             if exact_size and matched_format.get("acodec") == "none":
-                                # Ajouter l'audio (~16 Ko/s * durée)
                                 exact_size += int(16000 * duration)
                         
-                        # Si pas de taille exacte dans les métadonnées, calculer précisément via (bitrate * durée)
                         if not exact_size and duration > 0:
                             total_kbps = bitrate_map.get(h, 1000) + 128
                             exact_size = int((total_kbps * 1000 / 8) * duration)
@@ -130,7 +137,6 @@ class MediaExtractor:
                             "is_direct_cdn": False
                         })
 
-                # Formats Audio calculés selon la durée réelle
                 audio_320_size = int((320 * 1000 / 8) * duration) if duration > 0 else None
                 audio_128_size = int((128 * 1000 / 8) * duration) if duration > 0 else None
 
@@ -156,7 +162,6 @@ class MediaExtractor:
                 })
 
             else:
-                # Autres plateformes (TikTok, Instagram, Twitter/X, etc.)
                 seen_res = set()
                 for f in raw_formats:
                     f_id = f.get("format_id")
