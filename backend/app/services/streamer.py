@@ -85,79 +85,6 @@ class MediaStreamer:
         return hook
 
     @classmethod
-    def _download_stream_chunks(cls, task_id: str, stream_url: str, out_file: str) -> bool:
-        """Télécharge un flux binaire avec suivi de progression temps réel."""
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "*/*"
-        }
-        with httpx.Client(timeout=120.0, follow_redirects=True, headers=headers) as client:
-            with client.stream("GET", stream_url) as resp:
-                if resp.status_code != 200:
-                    return False
-                
-                total_bytes = int(resp.headers.get("content-length", 0))
-                total_mb = f"{total_bytes / (1024 * 1024):.1f} Mo" if total_bytes > 0 else "..."
-                
-                downloaded = 0
-                start_time = time.time()
-
-                with open(out_file, "wb") as f:
-                    for chunk in resp.iter_bytes(chunk_size=65536):
-                        if download_tasks[task_id].get("cancelled"):
-                            raise Exception("DOWNLOAD_CANCELLED_BY_USER")
-                        
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        
-                        elapsed = max(0.1, time.time() - start_time)
-                        speed_mb = (downloaded / (1024 * 1024)) / elapsed
-                        percent = round((downloaded / total_bytes) * 100, 1) if total_bytes > 0 else min(95, int(downloaded / (15 * 1024 * 1024) * 100))
-
-                        download_tasks[task_id].update({
-                            "status": "downloading",
-                            "percent": percent,
-                            "speed": f"{speed_mb:.1f} Mo/s",
-                            "downloaded_mb": f"{downloaded / (1024 * 1024):.1f} Mo",
-                            "total_mb": total_mb,
-                            "updated_at": time.time()
-                        })
-                return os.path.exists(out_file) and os.path.getsize(out_file) > 1024
-
-    @classmethod
-    def _download_youtube_proxy(cls, task_id: str, video_id: str, final_file: str, is_audio: bool, quality: str) -> bool:
-        """Télécharge directement les flux proxy Invidious / Piped via les itags YouTube (22=720p HD, 18=360p, 140=audio)."""
-        itag = "140" if is_audio else ("22" if quality in ("1080", "720") else "18")
-        
-        mirrors = [
-            f"https://invidious.nerdvpn.de/latest_version?id={video_id}&itag={itag}",
-            f"https://inv.tux.pizza/latest_version?id={video_id}&itag={itag}",
-            f"https://invidious.jing.rocks/latest_version?id={video_id}&itag={itag}",
-            f"https://vid.priv.au/latest_version?id={video_id}&itag={itag}",
-            f"https://invidious.projectsegfau.lt/latest_version?id={video_id}&itag={itag}"
-        ]
-
-        temp_download_file = final_file
-        if is_audio:
-            temp_download_file = final_file + ".m4a"
-
-        for mirror_url in mirrors:
-            try:
-                success = cls._download_stream_chunks(task_id, mirror_url, temp_download_file)
-                if success:
-                    if is_audio:
-                        # Conversion rapide en MP3 via FFmpeg
-                        download_tasks[task_id].update({"status": "converting", "percent": 98, "speed": "Conversion MP3..."})
-                        cmd = ["ffmpeg", "-y", "-i", temp_download_file, "-vn", "-b:a", "320k", final_file]
-                        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-                        if os.path.exists(temp_download_file):
-                            os.remove(temp_download_file)
-                    return True
-            except Exception as e:
-                continue
-        return False
-
-    @classmethod
     def execute_download_task(
         cls, 
         task_id: str, 
@@ -169,9 +96,7 @@ class MediaStreamer:
     ):
         tmp_dir = "/tmp"
         target_ext = ext.lower()
-        final_file = os.path.join(tmp_dir, f"getvideo_{task_id}.{target_ext}")
-        is_audio = (target_ext == "mp3")
-        video_id = extract_video_id(media_url)
+        out_template = os.path.join(tmp_dir, f"getvideo_{task_id}.%(ext)s")
 
         download_tasks[task_id] = {
             "status": "starting",
@@ -187,30 +112,6 @@ class MediaStreamer:
             "updated_at": time.time()
         }
 
-        # 1. Si c'est YouTube : Utiliser le flux proxy direct Invidious (insensible au blocage IP de Render)
-        if video_id:
-            try:
-                quality = "720"
-                if format_selector and format_selector in ("1080", "720", "480", "360"):
-                    quality = format_selector
-                
-                success = cls._download_youtube_proxy(task_id, video_id, final_file, is_audio, quality)
-                if success and os.path.exists(final_file) and os.path.getsize(final_file) > 1024:
-                    download_tasks[task_id].update({
-                        "status": "ready",
-                        "percent": 100,
-                        "filepath": final_file,
-                        "filesize": os.path.getsize(final_file),
-                        "updated_at": time.time()
-                    })
-                    return
-            except Exception as e:
-                if "DOWNLOAD_CANCELLED_BY_USER" in str(e):
-                    download_tasks[task_id].update({"status": "cancelled"})
-                    return
-
-        # 2. Pour TikTok, Instagram, Twitter/X et autres : yt-dlp natif
-        out_template = os.path.join(tmp_dir, f"getvideo_{task_id}.%(ext)s")
         ydl_opts = {
             'outtmpl': out_template,
             'quiet': True,
@@ -218,6 +119,11 @@ class MediaStreamer:
             'noplaylist': True,
             'no_color': True,
             'progress_hooks': [cls.get_progress_hook(task_id)],
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'mweb', 'tv'],
+                }
+            },
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8',
@@ -231,8 +137,13 @@ class MediaStreamer:
                 'preferredcodec': 'mp3',
                 'preferredquality': '320',
             }]
+        elif target_ext == "m4a":
+            ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
         else:
-            ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
+            selector = format_selector or "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+            if selector in ("1080", "720", "480", "360"):
+                selector = f"bestvideo[height<={selector}]+bestaudio/best"
+            ydl_opts['format'] = selector
             ydl_opts['merge_output_format'] = 'mp4'
 
         try:
@@ -249,22 +160,23 @@ class MediaStreamer:
                     if os.path.exists(candidate_mp4):
                         actual_file = candidate_mp4
 
-            if os.path.exists(actual_file):
-                download_tasks[task_id].update({
-                    "status": "ready",
-                    "percent": 100,
-                    "filepath": actual_file,
-                    "filesize": os.path.getsize(actual_file),
-                    "updated_at": time.time()
-                })
-                return
+            if not os.path.exists(actual_file):
+                raise FileNotFoundError(f"Fichier introuvable après téléchargement : {actual_file}")
+
+            download_tasks[task_id].update({
+                "status": "ready",
+                "percent": 100,
+                "filepath": actual_file,
+                "filesize": os.path.getsize(actual_file),
+                "updated_at": time.time()
+            })
 
         except Exception as e:
-            if "DOWNLOAD_CANCELLED_BY_USER" in str(e):
+            err_str = str(e)
+            if "DOWNLOAD_CANCELLED_BY_USER" in err_str:
                 download_tasks[task_id].update({"status": "cancelled"})
-                return
-
-        download_tasks[task_id].update({"status": "error", "error": "Échec du téléchargement. Veuillez réessayer."})
+            else:
+                download_tasks[task_id].update({"status": "error", "error": f"Erreur : {err_str}"})
 
     @classmethod
     def cancel_task(cls, task_id: str):
