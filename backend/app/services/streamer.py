@@ -2,13 +2,14 @@ import os
 import uuid
 import asyncio
 import time
+import httpx
 import yt_dlp
 from typing import Dict, Any
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from ..config import settings
 
-# Dictionnaire en mémoire des téléchargements en cours : task_id -> info de progression
+# Dictionnaire en mémoire des tâches de téléchargement : task_id -> info de progression
 download_tasks: Dict[str, Dict[str, Any]] = {}
 
 def cleanup_file(filepath: str, task_id: str | None = None):
@@ -27,7 +28,6 @@ class MediaStreamer:
             if task_id not in download_tasks:
                 return
 
-            # Vérifier si la tâche a été annulée par l'utilisateur
             if download_tasks[task_id].get("cancelled"):
                 raise Exception("DOWNLOAD_CANCELLED_BY_USER")
 
@@ -72,6 +72,39 @@ class MediaStreamer:
         return hook
 
     @classmethod
+    def _download_direct_stream(cls, task_id: str, stream_url: str, out_file: str):
+        """Téléchargement direct de flux par blocs (chunks) avec suivi temps réel."""
+        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+            with client.stream("GET", stream_url) as resp:
+                resp.raise_for_status()
+                total_bytes = int(resp.headers.get("content-length", 0))
+                total_mb = f"{total_bytes / (1024 * 1024):.1f} Mo" if total_bytes > 0 else "Inconnue"
+                
+                downloaded = 0
+                start_time = time.time()
+
+                with open(out_file, "wb") as f:
+                    for chunk in resp.iter_bytes(chunk_size=65536):
+                        if download_tasks[task_id].get("cancelled"):
+                            raise Exception("DOWNLOAD_CANCELLED_BY_USER")
+                        
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        elapsed = max(0.1, time.time() - start_time)
+                        speed_mb = (downloaded / (1024 * 1024)) / elapsed
+                        percent = round((downloaded / total_bytes) * 100, 1) if total_bytes > 0 else 50
+
+                        download_tasks[task_id].update({
+                            "status": "downloading",
+                            "percent": percent,
+                            "speed": f"{speed_mb:.1f} Mo/s",
+                            "downloaded_mb": f"{downloaded / (1024 * 1024):.1f} Mo",
+                            "total_mb": total_mb,
+                            "updated_at": time.time()
+                        })
+
+    @classmethod
     def execute_download_task(
         cls, 
         task_id: str, 
@@ -84,6 +117,7 @@ class MediaStreamer:
         tmp_dir = "/tmp"
         out_template = os.path.join(tmp_dir, f"getvideo_{task_id}.%(ext)s")
         target_ext = ext.lower()
+        final_file = os.path.join(tmp_dir, f"getvideo_{task_id}.{target_ext}")
 
         download_tasks[task_id] = {
             "status": "starting",
@@ -99,6 +133,24 @@ class MediaStreamer:
             "updated_at": time.time()
         }
 
+        # Si l'URL est un flux direct (ex: CDN GoogleVideo ou Invidious)
+        if "googlevideo.com" in media_url or "piped" in media_url or "invidious" in media_url:
+            try:
+                cls._download_direct_stream(task_id, media_url, final_file)
+                download_tasks[task_id].update({
+                    "status": "ready",
+                    "percent": 100,
+                    "filepath": final_file,
+                    "filesize": os.path.getsize(final_file),
+                    "updated_at": time.time()
+                })
+                return
+            except Exception as e:
+                if "DOWNLOAD_CANCELLED_BY_USER" in str(e):
+                    download_tasks[task_id].update({"status": "cancelled"})
+                    return
+                print(f"[MediaStreamer] Fallback stream direct échoué, essai yt-dlp...")
+
         ydl_opts = {
             'outtmpl': out_template,
             'quiet': True,
@@ -108,11 +160,11 @@ class MediaStreamer:
             'progress_hooks': [cls.get_progress_hook(task_id)],
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'ios', 'mweb', 'tv_embedded', 'web_creator'],
+                    'player_client': ['tv_embedded', 'android', 'ios', 'mweb', 'web_creator'],
                 }
             },
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
             }
         }
