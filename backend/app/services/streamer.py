@@ -86,8 +86,12 @@ class MediaStreamer:
 
     @classmethod
     def _download_stream_url(cls, task_id: str, stream_url: str, out_file: str):
-        """Télécharge un flux binaire directement par blocs avec rapport de progression fluide."""
-        with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+        """Télécharge un flux binaire directement par blocs avec rapport de progression temps réel."""
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "*/*"
+        }
+        with httpx.Client(timeout=120.0, follow_redirects=True, headers=headers) as client:
             with client.stream("GET", stream_url) as resp:
                 resp.raise_for_status()
                 total_bytes = int(resp.headers.get("content-length", 0))
@@ -106,7 +110,7 @@ class MediaStreamer:
                         
                         elapsed = max(0.1, time.time() - start_time)
                         speed_mb = (downloaded / (1024 * 1024)) / elapsed
-                        percent = round((downloaded / total_bytes) * 100, 1) if total_bytes > 0 else min(95, int(downloaded / (20 * 1024 * 1024) * 100))
+                        percent = round((downloaded / total_bytes) * 100, 1) if total_bytes > 0 else min(95, int(downloaded / (15 * 1024 * 1024) * 100))
 
                         download_tasks[task_id].update({
                             "status": "downloading",
@@ -118,43 +122,38 @@ class MediaStreamer:
                         })
 
     @classmethod
-    def _download_via_fallback_mirrors(cls, task_id: str, video_id: str, final_file: str, is_audio: bool) -> bool:
-        """Récupère et télécharge le flux vidéo ou audio via le pool Invidious / Piped."""
-        mirrors = [
-            f"https://invidious.nerdvpn.de/api/v1/videos/{video_id}",
-            f"https://inv.tux.pizza/api/v1/videos/{video_id}",
-            f"https://invidious.jing.rocks/api/v1/videos/{video_id}",
-            f"https://vid.priv.au/api/v1/videos/{video_id}"
+    def _download_via_cobalt_network(cls, task_id: str, media_url: str, final_file: str, is_audio: bool, quality: str = "720") -> bool:
+        """Télécharge via les instances publiques de l'API Cobalt (solution n°1 mondiale sans blocage IP)."""
+        cobalt_instances = [
+            "https://api.cobalt.tools",
+            "https://cobalt-api.kwiatekm.tokyo",
+            "https://cobalt.canine.tools",
+            "https://api.wuk.sh"
         ]
 
-        for mirror in mirrors:
+        payload = {
+            "url": media_url,
+            "downloadMode": "audio" if is_audio else "auto",
+            "videoQuality": quality if quality in ("1080", "720", "480", "360") else "720",
+            "audioFormat": "mp3"
+        }
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "GetVideo/2.0"
+        }
+
+        for instance in cobalt_instances:
             try:
-                with httpx.Client(timeout=5.0, follow_redirects=True) as client:
-                    resp = client.get(mirror)
+                with httpx.Client(timeout=8.0, follow_redirects=True) as client:
+                    resp = client.post(instance, json=payload, headers=headers)
                     if resp.status_code == 200:
                         data = resp.json()
-                        formats = data.get("formatStreams") or data.get("adaptiveFormats") or []
-                        
-                        target_url = None
-                        if is_audio:
-                            # Chercher flux audio
-                            for f in formats:
-                                if "audio" in f.get("type", "").lower() or "audio" in f.get("mimeType", "").lower():
-                                    target_url = f.get("url")
-                                    if target_url:
-                                        break
-                        else:
-                            # Chercher flux vidéo 720p ou HD
-                            for f in formats:
-                                if "video" in f.get("type", "").lower() or "mp4" in f.get("type", "").lower():
-                                    target_url = f.get("url")
-                                    if target_url:
-                                        break
-
-                        if target_url:
-                            cls._download_stream_url(task_id, target_url, final_file)
+                        download_url = data.get("url")
+                        if download_url:
+                            cls._download_stream_url(task_id, download_url, final_file)
                             return True
-            except Exception:
+            except Exception as e:
                 continue
         return False
 
@@ -169,10 +168,9 @@ class MediaStreamer:
         embed_subs: bool = False
     ):
         tmp_dir = "/tmp"
-        out_template = os.path.join(tmp_dir, f"getvideo_{task_id}.%(ext)s")
         target_ext = ext.lower()
         final_file = os.path.join(tmp_dir, f"getvideo_{task_id}.{target_ext}")
-        video_id = extract_video_id(media_url)
+        is_audio = (target_ext == "mp3")
 
         download_tasks[task_id] = {
             "status": "starting",
@@ -188,7 +186,29 @@ class MediaStreamer:
             "updated_at": time.time()
         }
 
-        # 1. Tentative yt-dlp avec client mobile
+        # 1. Étape 1 : Moteur Haute Vitesse Cobalt (Anti-Blocage Cloud)
+        try:
+            quality = "720"
+            if format_selector and format_selector in ("1080", "720", "480", "360"):
+                quality = format_selector
+            
+            success = cls._download_via_cobalt_network(task_id, media_url, final_file, is_audio, quality)
+            if success and os.path.exists(final_file) and os.path.getsize(final_file) > 1024:
+                download_tasks[task_id].update({
+                    "status": "ready",
+                    "percent": 100,
+                    "filepath": final_file,
+                    "filesize": os.path.getsize(final_file),
+                    "updated_at": time.time()
+                })
+                return
+        except Exception as e:
+            if "DOWNLOAD_CANCELLED_BY_USER" in str(e):
+                download_tasks[task_id].update({"status": "cancelled"})
+                return
+
+        # 2. Étape 2 : Moteur Natif yt-dlp
+        out_template = os.path.join(tmp_dir, f"getvideo_{task_id}.%(ext)s")
         ydl_opts = {
             'outtmpl': out_template,
             'quiet': True,
@@ -214,8 +234,6 @@ class MediaStreamer:
                 'preferredcodec': 'mp3',
                 'preferredquality': '320',
             }]
-        elif target_ext == "m4a":
-            ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
         else:
             selector = format_selector or "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
             if selector in ("1080", "720", "480", "360"):
@@ -248,28 +266,11 @@ class MediaStreamer:
                 return
 
         except Exception as e:
-            err_str = str(e)
-            if "DOWNLOAD_CANCELLED_BY_USER" in err_str:
+            if "DOWNLOAD_CANCELLED_BY_USER" in str(e):
                 download_tasks[task_id].update({"status": "cancelled"})
                 return
-            
-            # 2. Si YouTube bloque l'IP du serveur : Déclenchement automatique du moteur miroir de secours
-            if video_id:
-                try:
-                    success = cls._download_via_fallback_mirrors(task_id, video_id, final_file, is_audio=(target_ext == "mp3"))
-                    if success and os.path.exists(final_file):
-                        download_tasks[task_id].update({
-                            "status": "ready",
-                            "percent": 100,
-                            "filepath": final_file,
-                            "filesize": os.path.getsize(final_file),
-                            "updated_at": time.time()
-                        })
-                        return
-                except Exception as ex_mirror:
-                    print(f"[MediaStreamer] Erreur miroir: {ex_mirror}")
 
-            download_tasks[task_id].update({"status": "error", "error": "Échec du téléchargement. Veuillez réessayer."})
+        download_tasks[task_id].update({"status": "error", "error": "Échec du téléchargement. Veuillez réessayer."})
 
     @classmethod
     def cancel_task(cls, task_id: str):
