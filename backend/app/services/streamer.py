@@ -108,12 +108,11 @@ class MediaStreamer:
             'progress_hooks': [cls.get_progress_hook(task_id)],
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['ios', 'android', 'mweb', 'tv'],
-                    'player_skip': ['webpage', 'configs', 'js'],
+                    'player_client': ['android', 'ios', 'mweb', 'tv_embedded', 'web_creator'],
                 }
             },
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
                 'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
             }
         }

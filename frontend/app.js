@@ -263,8 +263,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (savedTheme) {
         applyTheme(savedTheme === 'dark');
     } else {
-        const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        applyTheme(prefersDark);
+        // Thème sombre PAR DÉFAUT pour tous les nouveaux utilisateurs
+        applyTheme(true);
     }
 
     if (themeToggleBtn) {
