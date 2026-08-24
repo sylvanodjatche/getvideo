@@ -85,6 +85,83 @@ class MediaStreamer:
         return hook
 
     @classmethod
+    def _download_stream_chunks(cls, task_id: str, stream_url: str, out_file: str) -> bool:
+        """Téléchargement direct par blocs avec barre de progression."""
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "*/*"
+        }
+        with httpx.Client(timeout=180.0, follow_redirects=True, headers=headers) as client:
+            with client.stream("GET", stream_url) as resp:
+                if resp.status_code != 200:
+                    return False
+                
+                total_bytes = int(resp.headers.get("content-length", 0))
+                total_mb = f"{total_bytes / (1024 * 1024):.1f} Mo" if total_bytes > 0 else "Calcul..."
+                
+                downloaded = 0
+                start_time = time.time()
+
+                with open(out_file, "wb") as f:
+                    for chunk in resp.iter_bytes(chunk_size=65536):
+                        if download_tasks[task_id].get("cancelled"):
+                            raise Exception("DOWNLOAD_CANCELLED_BY_USER")
+                        
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        elapsed = max(0.1, time.time() - start_time)
+                        speed_mb = (downloaded / (1024 * 1024)) / elapsed
+                        percent = round((downloaded / total_bytes) * 100, 1) if total_bytes > 0 else min(95, int(downloaded / (20 * 1024 * 1024) * 100))
+
+                        download_tasks[task_id].update({
+                            "status": "downloading",
+                            "percent": percent,
+                            "speed": f"{speed_mb:.1f} Mo/s",
+                            "downloaded_mb": f"{downloaded / (1024 * 1024):.1f} Mo",
+                            "total_mb": total_mb,
+                            "updated_at": time.time()
+                        })
+                return os.path.exists(out_file) and os.path.getsize(out_file) > 1024
+
+    @classmethod
+    def _download_via_cobalt_cloud(cls, task_id: str, media_url: str, final_file: str, is_audio: bool, quality: str = "720") -> bool:
+        """Télécharge via le réseau d'API Cobalt (spécialement conçu pour bypasser les blocages cloud)."""
+        cobalt_endpoints = [
+            "https://api.cobalt.tools/",
+            "https://cobalt-api.kwiatekm.tokyo/",
+            "https://cobalt.canine.tools/",
+            "https://api.wuk.sh/"
+        ]
+
+        payload = {
+            "url": media_url,
+            "downloadMode": "audio" if is_audio else "auto",
+            "videoQuality": quality if quality in ("1080", "720", "480", "360") else "720",
+            "audioFormat": "mp3"
+        }
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "GetVideo/2.0"
+        }
+
+        for endpoint in cobalt_endpoints:
+            try:
+                with httpx.Client(timeout=8.0, follow_redirects=True) as client:
+                    resp = client.post(endpoint, json=payload, headers=headers)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        stream_url = data.get("url")
+                        if stream_url:
+                            success = cls._download_stream_chunks(task_id, stream_url, final_file)
+                            if success:
+                                return True
+            except Exception:
+                continue
+        return False
+
+    @classmethod
     def execute_download_task(
         cls, 
         task_id: str, 
@@ -96,7 +173,9 @@ class MediaStreamer:
     ):
         tmp_dir = "/tmp"
         target_ext = ext.lower()
-        out_template = os.path.join(tmp_dir, f"getvideo_{task_id}.%(ext)s")
+        final_file = os.path.join(tmp_dir, f"getvideo_{task_id}.{target_ext}")
+        is_audio = (target_ext == "mp3")
+        video_id = extract_video_id(media_url)
 
         download_tasks[task_id] = {
             "status": "starting",
@@ -112,6 +191,30 @@ class MediaStreamer:
             "updated_at": time.time()
         }
 
+        # 1. Étape 1 : Si on est sur YouTube, tenter d'abord Cobalt pour contourner le blocage IP du datacenter
+        if video_id:
+            try:
+                quality = "720"
+                if format_selector and format_selector in ("1080", "720", "480", "360"):
+                    quality = format_selector
+                
+                success = cls._download_via_cobalt_cloud(task_id, media_url, final_file, is_audio, quality)
+                if success and os.path.exists(final_file) and os.path.getsize(final_file) > 1024:
+                    download_tasks[task_id].update({
+                        "status": "ready",
+                        "percent": 100,
+                        "filepath": final_file,
+                        "filesize": os.path.getsize(final_file),
+                        "updated_at": time.time()
+                    })
+                    return
+            except Exception as e:
+                if "DOWNLOAD_CANCELLED_BY_USER" in str(e):
+                    download_tasks[task_id].update({"status": "cancelled"})
+                    return
+
+        # 2. Étape 2 : yt-dlp natif (marche en local et pour TikTok, Instagram, Twitter, etc.)
+        out_template = os.path.join(tmp_dir, f"getvideo_{task_id}.%(ext)s")
         ydl_opts = {
             'outtmpl': out_template,
             'quiet': True,
@@ -121,7 +224,7 @@ class MediaStreamer:
             'progress_hooks': [cls.get_progress_hook(task_id)],
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'ios', 'mweb', 'tv'],
+                    'player_client': ['tv_embedded', 'android', 'ios', 'mweb'],
                 }
             },
             'http_headers': {
@@ -142,7 +245,7 @@ class MediaStreamer:
         else:
             selector = format_selector or "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
             if selector in ("1080", "720", "480", "360"):
-                selector = f"bestvideo[height<={selector}]+bestaudio/best"
+                selector = f"bestvideo[height<={selector}]+bestaudio/best[height<={selector}]/best"
             ydl_opts['format'] = selector
             ydl_opts['merge_output_format'] = 'mp4'
 
@@ -160,23 +263,23 @@ class MediaStreamer:
                     if os.path.exists(candidate_mp4):
                         actual_file = candidate_mp4
 
-            if not os.path.exists(actual_file):
-                raise FileNotFoundError(f"Fichier introuvable après téléchargement : {actual_file}")
-
-            download_tasks[task_id].update({
-                "status": "ready",
-                "percent": 100,
-                "filepath": actual_file,
-                "filesize": os.path.getsize(actual_file),
-                "updated_at": time.time()
-            })
+            if os.path.exists(actual_file):
+                download_tasks[task_id].update({
+                    "status": "ready",
+                    "percent": 100,
+                    "filepath": actual_file,
+                    "filesize": os.path.getsize(actual_file),
+                    "updated_at": time.time()
+                })
+                return
 
         except Exception as e:
             err_str = str(e)
             if "DOWNLOAD_CANCELLED_BY_USER" in err_str:
                 download_tasks[task_id].update({"status": "cancelled"})
-            else:
-                download_tasks[task_id].update({"status": "error", "error": f"Erreur : {err_str}"})
+                return
+
+        download_tasks[task_id].update({"status": "error", "error": "Échec du téléchargement. Veuillez réessayer."})
 
     @classmethod
     def cancel_task(cls, task_id: str):
