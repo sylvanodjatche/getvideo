@@ -4,13 +4,13 @@ import asyncio
 import time
 import httpx
 import yt_dlp
+import subprocess
 import re
 from typing import Dict, Any
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from ..config import settings
 
-# Dictionnaire en mémoire des tâches de téléchargement : task_id -> info de progression
 download_tasks: Dict[str, Dict[str, Any]] = {}
 
 def cleanup_file(filepath: str, task_id: str | None = None):
@@ -85,15 +85,17 @@ class MediaStreamer:
         return hook
 
     @classmethod
-    def _download_stream_url(cls, task_id: str, stream_url: str, out_file: str):
-        """Télécharge un flux binaire directement par blocs avec rapport de progression temps réel."""
+    def _download_stream_chunks(cls, task_id: str, stream_url: str, out_file: str) -> bool:
+        """Télécharge un flux binaire avec suivi de progression temps réel."""
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept": "*/*"
         }
         with httpx.Client(timeout=120.0, follow_redirects=True, headers=headers) as client:
             with client.stream("GET", stream_url) as resp:
-                resp.raise_for_status()
+                if resp.status_code != 200:
+                    return False
+                
                 total_bytes = int(resp.headers.get("content-length", 0))
                 total_mb = f"{total_bytes / (1024 * 1024):.1f} Mo" if total_bytes > 0 else "..."
                 
@@ -120,39 +122,37 @@ class MediaStreamer:
                             "total_mb": total_mb,
                             "updated_at": time.time()
                         })
+                return os.path.exists(out_file) and os.path.getsize(out_file) > 1024
 
     @classmethod
-    def _download_via_cobalt_network(cls, task_id: str, media_url: str, final_file: str, is_audio: bool, quality: str = "720") -> bool:
-        """Télécharge via les instances publiques de l'API Cobalt (solution n°1 mondiale sans blocage IP)."""
-        cobalt_instances = [
-            "https://api.cobalt.tools",
-            "https://cobalt-api.kwiatekm.tokyo",
-            "https://cobalt.canine.tools",
-            "https://api.wuk.sh"
+    def _download_youtube_proxy(cls, task_id: str, video_id: str, final_file: str, is_audio: bool, quality: str) -> bool:
+        """Télécharge directement les flux proxy Invidious / Piped via les itags YouTube (22=720p HD, 18=360p, 140=audio)."""
+        itag = "140" if is_audio else ("22" if quality in ("1080", "720") else "18")
+        
+        mirrors = [
+            f"https://invidious.nerdvpn.de/latest_version?id={video_id}&itag={itag}",
+            f"https://inv.tux.pizza/latest_version?id={video_id}&itag={itag}",
+            f"https://invidious.jing.rocks/latest_version?id={video_id}&itag={itag}",
+            f"https://vid.priv.au/latest_version?id={video_id}&itag={itag}",
+            f"https://invidious.projectsegfau.lt/latest_version?id={video_id}&itag={itag}"
         ]
 
-        payload = {
-            "url": media_url,
-            "downloadMode": "audio" if is_audio else "auto",
-            "videoQuality": quality if quality in ("1080", "720", "480", "360") else "720",
-            "audioFormat": "mp3"
-        }
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "GetVideo/2.0"
-        }
+        temp_download_file = final_file
+        if is_audio:
+            temp_download_file = final_file + ".m4a"
 
-        for instance in cobalt_instances:
+        for mirror_url in mirrors:
             try:
-                with httpx.Client(timeout=8.0, follow_redirects=True) as client:
-                    resp = client.post(instance, json=payload, headers=headers)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        download_url = data.get("url")
-                        if download_url:
-                            cls._download_stream_url(task_id, download_url, final_file)
-                            return True
+                success = cls._download_stream_chunks(task_id, mirror_url, temp_download_file)
+                if success:
+                    if is_audio:
+                        # Conversion rapide en MP3 via FFmpeg
+                        download_tasks[task_id].update({"status": "converting", "percent": 98, "speed": "Conversion MP3..."})
+                        cmd = ["ffmpeg", "-y", "-i", temp_download_file, "-vn", "-b:a", "320k", final_file]
+                        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                        if os.path.exists(temp_download_file):
+                            os.remove(temp_download_file)
+                    return True
             except Exception as e:
                 continue
         return False
@@ -171,6 +171,7 @@ class MediaStreamer:
         target_ext = ext.lower()
         final_file = os.path.join(tmp_dir, f"getvideo_{task_id}.{target_ext}")
         is_audio = (target_ext == "mp3")
+        video_id = extract_video_id(media_url)
 
         download_tasks[task_id] = {
             "status": "starting",
@@ -186,28 +187,29 @@ class MediaStreamer:
             "updated_at": time.time()
         }
 
-        # 1. Étape 1 : Moteur Haute Vitesse Cobalt (Anti-Blocage Cloud)
-        try:
-            quality = "720"
-            if format_selector and format_selector in ("1080", "720", "480", "360"):
-                quality = format_selector
-            
-            success = cls._download_via_cobalt_network(task_id, media_url, final_file, is_audio, quality)
-            if success and os.path.exists(final_file) and os.path.getsize(final_file) > 1024:
-                download_tasks[task_id].update({
-                    "status": "ready",
-                    "percent": 100,
-                    "filepath": final_file,
-                    "filesize": os.path.getsize(final_file),
-                    "updated_at": time.time()
-                })
-                return
-        except Exception as e:
-            if "DOWNLOAD_CANCELLED_BY_USER" in str(e):
-                download_tasks[task_id].update({"status": "cancelled"})
-                return
+        # 1. Si c'est YouTube : Utiliser le flux proxy direct Invidious (insensible au blocage IP de Render)
+        if video_id:
+            try:
+                quality = "720"
+                if format_selector and format_selector in ("1080", "720", "480", "360"):
+                    quality = format_selector
+                
+                success = cls._download_youtube_proxy(task_id, video_id, final_file, is_audio, quality)
+                if success and os.path.exists(final_file) and os.path.getsize(final_file) > 1024:
+                    download_tasks[task_id].update({
+                        "status": "ready",
+                        "percent": 100,
+                        "filepath": final_file,
+                        "filesize": os.path.getsize(final_file),
+                        "updated_at": time.time()
+                    })
+                    return
+            except Exception as e:
+                if "DOWNLOAD_CANCELLED_BY_USER" in str(e):
+                    download_tasks[task_id].update({"status": "cancelled"})
+                    return
 
-        # 2. Étape 2 : Moteur Natif yt-dlp
+        # 2. Pour TikTok, Instagram, Twitter/X et autres : yt-dlp natif
         out_template = os.path.join(tmp_dir, f"getvideo_{task_id}.%(ext)s")
         ydl_opts = {
             'outtmpl': out_template,
@@ -216,13 +218,8 @@ class MediaStreamer:
             'noplaylist': True,
             'no_color': True,
             'progress_hooks': [cls.get_progress_hook(task_id)],
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android_creator', 'ios', 'android', 'mweb', 'tv'],
-                }
-            },
             'http_headers': {
-                'User-Agent': 'com.google.android.youtube/19.12.35 (Linux; U; Android 14; fr_FR; SM-S918B) gzip',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8',
             }
         }
@@ -235,10 +232,7 @@ class MediaStreamer:
                 'preferredquality': '320',
             }]
         else:
-            selector = format_selector or "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
-            if selector in ("1080", "720", "480", "360"):
-                selector = f"bestvideo[height<={selector}]+bestaudio/best"
-            ydl_opts['format'] = selector
+            ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
             ydl_opts['merge_output_format'] = 'mp4'
 
         try:
