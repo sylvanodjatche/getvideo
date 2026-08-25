@@ -1,4 +1,4 @@
-# ⚡ GetVideo - High-Performance Universal Media Extraction & Streaming Engine
+#  GetVideo - High-Performance Universal Media Extraction & Streaming Engine
 
 <div align="center">
 
@@ -12,13 +12,13 @@
 **A modern, production-grade, zero-storage media extraction and processing platform.**  
 Seamlessly download high-definition video (up to 4K) and studio-grade audio (320 kbps) from **YouTube, TikTok (No Watermark), Instagram, Twitter/X, SoundCloud**, and 1000+ sources with real-time progress synchronization.
 
-[🚀 Explore Live Demo](https://getvideo-9k6s.onrender.com) • [📊 View Live Analytics](https://getvideo-9k6s.onrender.com/admin.html) • [📖 API Documentation](https://getvideo-9k6s.onrender.com/docs)
+[ Explore Live Demo](https://getvideo-9k6s.onrender.com) • [📊 View Live Analytics](https://getvideo-9k6s.onrender.com/admin.html) • [📖 API Documentation](https://getvideo-9k6s.onrender.com/docs)
 
 ---
 
 </div>
 
-## 📸 Interface Preview
+##  Interface Preview
 
 <div align="center">
   <img src="assets/previews.png" alt="GetVideo Dashboard Preview" width="850px" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);">
@@ -27,20 +27,20 @@ Seamlessly download high-definition video (up to 4K) and studio-grade audio (320
 
 ---
 
-## 🌟 Key Features
+##  Key Features
 
-- **🎯 Universal Media Support**: Extract media from YouTube, TikTok, Instagram, Twitter/X, Facebook, SoundCloud, Twitch, Vimeo, and more.
+- ** Universal Media Support**: Extract media from YouTube, TikTok, Instagram, Twitter/X, Facebook, SoundCloud, Twitch, Vimeo, and more.
 - **⚡ Real-Time Progress Synchronization**: Async background task processing with sub-second polling (350ms) reporting exact download percentage (0% $\rightarrow$ 100%), network speed, and ETA.
 - **🛡️ Zero-Storage Policy**: Ephemeral temporary storage with Starlette `BackgroundTask` automated zero-leak deletion immediately upon file delivery.
 - **🎵 Studio Audio & HD Video Muxing**: Automatic stream demuxing and remuxing with `FFmpeg` to produce merged 1080p/4K MP4 and clean 320 kbps MP3 files.
 - **🌐 Dynamic Multi-Language Engine (i18n)**: 6 fully supported languages with instant client-side switching and RTL support (English 🇬🇧, French 🇫🇷, Spanish 🇪🇸, Arabic 🇸🇦, German 🇩🇪, Portuguese 🇵🇹).
 - **📊 Embedded Real-Time Analytics Dashboard**: Built-in SQLite-backed KPI tracker monitoring total requests, successful downloads, transferred bandwidth, and top platforms (`/admin.html`).
 - **📱 Responsive Mobile Experience & PWA**: Mobile-first design with dynamic QR-Code generation for instant smartphone downloading and PWA installability.
-- **🔒 Enterprise Security**: Sliding-window IP Rate Limiting (15 req/min), Anti-SSRF private subnet blocker, bad bot user-agent filtering, and strict HTTP security headers.
+- ** Enterprise Security**: Sliding-window IP Rate Limiting (15 req/min), Anti-SSRF private subnet blocker, bad bot user-agent filtering, and strict HTTP security headers.
 
 ---
 
-## 🏗️ Architecture & Pipeline
+##  Architecture & Pipeline
 
 GetVideo is engineered with an asynchronous event-driven pipeline designed for low memory consumption (< 60 MB RAM) and high concurrency:
 
@@ -75,7 +75,7 @@ sequenceDiagram
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 - **Backend**: Python 3.11, [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [HTTPX](https://www.python-httpx.org/), Starlette
 - **Multimedia Engine**: [FFmpeg](https://ffmpeg.org/) (Multi-stream audio/video merger & transcoder)
@@ -86,7 +86,7 @@ sequenceDiagram
 
 ---
 
-## 💻 Local Installation & Setup
+##  Local Installation & Setup
 
 Follow these simple steps to run GetVideo locally on your computer.
 
@@ -153,13 +153,13 @@ uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Open your browser and navigate to:
-- 🌐 **Web Interface:** `http://localhost:8000`
-- 📊 **Analytics Dashboard:** `http://localhost:8000/admin.html`
-- 📖 **Interactive Swagger API Docs:** `http://localhost:8000/docs`
+-  **Web Interface:** `http://localhost:8000`
+-  **Analytics Dashboard:** `http://localhost:8000/admin.html`
+-  **Interactive Swagger API Docs:** `http://localhost:8000/docs`
 
 ---
 
-## 🐳 Docker Deployment
+##  Docker Deployment
 
 To run GetVideo inside an isolated Docker container:
 
@@ -175,7 +175,7 @@ Your service is now available at `http://localhost:8000`.
 
 ---
 
-## 🔌 API Endpoints Reference
+##  API Endpoints Reference
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
@@ -190,7 +190,7 @@ Your service is now available at `http://localhost:8000`.
 
 ---
 
-## 📈 Live Analytics & KPIs
+##  Live Analytics & KPIs
 
 GetVideo includes an integrated, zero-overhead analytics dashboard accessible at `/admin.html`. It tracks:
 1. **Total Extractions**: Quantifies user interactions and analyzed media links.
@@ -207,7 +207,7 @@ This project is open-source and distributed under the **MIT License**. See the [
 
 ---
 
-## 👨‍💻 Author
+##  Author
 
 **Sylvano Djatche**  
 *Software Engineer & Full-Stack Developer*  
