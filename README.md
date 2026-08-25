@@ -210,6 +210,6 @@ This project is open-source and distributed under the **MIT License**. See the [
 ##  Author
 
 **Sylvano Djatche**  
-*Software Engineer & Full-Stack Developer*  
+* Data Scientist & MLops & Full-Stack Developer*  
 - **GitHub:** [@sylvanodjatche](https://github.com/sylvanodjatche)
 - **Project Repository:** [github.com/sylvanodjatche/getvideo](https://github.com/sylvanodjatche/getvideo)
