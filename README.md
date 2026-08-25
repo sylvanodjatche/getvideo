@@ -21,7 +21,7 @@ Seamlessly download high-definition video (up to 4K) and studio-grade audio (320
 ## 📸 Interface Preview
 
 <div align="center">
-  <img src="assets/preview.png" alt="GetVideo Dashboard Preview" width="850px" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);">
+  <img src="assets/previews.png" alt="GetVideo Dashboard Preview" width="850px" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);">
   <p><i>Modern Dark UI with Real-time Progress Tracking, Responsive QR Code, and Multi-language Support</i></p>
 </div>
 
