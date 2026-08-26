@@ -22,16 +22,23 @@ def cleanup_file(filepath: str, task_id: str | None = None):
     if task_id and task_id in download_tasks:
         download_tasks.pop(task_id, None)
 
-def extract_video_id(url: str) -> str | None:
-    patterns = [
-        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
-        r'youtu\.be\/([0-9A-Za-z_-]{11})',
-        r'shorts\/([0-9A-Za-z_-]{11})'
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
+def extract_youtube_video_id(url: str) -> str | None:
+    try:
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(url)
+        netloc = parsed.netloc.lower()
+        if "youtube.com" in netloc or "m.youtube.com" in netloc:
+            if "/shorts/" in parsed.path:
+                return parsed.path.split("/shorts/")[1].split("/")[0].split("?")[0]
+            query = parse_qs(parsed.query)
+            if "v" in query:
+                return query["v"][0]
+        elif "youtu.be" in netloc:
+            path_part = parsed.path.lstrip("/").split("/")[0].split("?")[0]
+            if len(path_part) >= 10:
+                return path_part
+    except Exception:
+        pass
     return None
 
 class MediaStreamer:
@@ -86,7 +93,7 @@ class MediaStreamer:
 
     @classmethod
     def _download_stream_chunks(cls, task_id: str, stream_url: str, out_file: str) -> bool:
-        """Téléchargement direct par blocs avec barre de progression."""
+        """Télécharge un flux binaire avec suivi de progression temps réel."""
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept": "*/*"
@@ -125,64 +132,19 @@ class MediaStreamer:
                 return os.path.exists(out_file) and os.path.getsize(out_file) > 1024
 
     @classmethod
-    def _download_via_cobalt_cloud(cls, task_id: str, media_url: str, final_file: str, is_audio: bool, quality: str = "720") -> bool:
-        """Télécharge via le réseau d'API Cobalt (spécialement conçu pour bypasser les blocages cloud)."""
-        cobalt_endpoints = [
-            "https://api.cobalt.tools/",
-            "https://cobalt-api.kwiatekm.tokyo/",
-            "https://cobalt.canine.tools/",
-            "https://api.wuk.sh/"
-        ]
-
-        payload = {
-            "url": media_url,
-            "downloadMode": "audio" if is_audio else "auto",
-            "videoQuality": quality if quality in ("1080", "720", "480", "360") else "720",
-            "audioFormat": "mp3"
-        }
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "GetVideo/2.0"
-        }
-
-        for endpoint in cobalt_endpoints:
-            try:
-                with httpx.Client(timeout=8.0, follow_redirects=True) as client:
-                    resp = client.post(endpoint, json=payload, headers=headers)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        stream_url = data.get("url")
-                        if stream_url:
-                            temp_target = final_file
-                            if is_audio and not final_file.endswith(".mp3"):
-                                temp_target = final_file + ".tmp"
-                            
-                            success = cls._download_stream_chunks(task_id, stream_url, temp_target)
-                            if success:
-                                if is_audio and temp_target != final_file:
-                                    cmd = ["ffmpeg", "-y", "-i", temp_target, "-vn", "-b:a", "320k", final_file]
-                                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-                                    if os.path.exists(temp_target):
-                                        os.remove(temp_target)
-                                return True
-            except Exception:
-                continue
-        return False
-
-    @classmethod
     def _download_via_invidious_pool(cls, task_id: str, video_id: str, final_file: str, is_audio: bool) -> bool:
-        """Télécharge le flux vidéo ou audio via le pool Invidious."""
-        invidious_endpoints = [
+        """Téléchargement direct YouTube via pool de miroirs Invidious décentralisés."""
+        endpoints = [
             f"https://invidious.nerdvpn.de/api/v1/videos/{video_id}",
             f"https://inv.tux.pizza/api/v1/videos/{video_id}",
             f"https://invidious.jing.rocks/api/v1/videos/{video_id}",
-            f"https://vid.priv.au/api/v1/videos/{video_id}"
+            f"https://vid.priv.au/api/v1/videos/{video_id}",
+            f"https://invidious.projectsegfau.lt/api/v1/videos/{video_id}"
         ]
 
-        for ep in invidious_endpoints:
+        for ep in endpoints:
             try:
-                with httpx.Client(timeout=5.0, follow_redirects=True) as client:
+                with httpx.Client(timeout=4.0, follow_redirects=True) as client:
                     r = client.get(ep)
                     if r.status_code == 200:
                         data = r.json()
@@ -227,7 +189,7 @@ class MediaStreamer:
         target_ext = ext.lower()
         final_file = os.path.join(tmp_dir, f"getvideo_{task_id}.{target_ext}")
         is_audio = (target_ext == "mp3")
-        video_id = extract_video_id(media_url)
+        video_id = extract_youtube_video_id(media_url)
 
         download_tasks[task_id] = {
             "status": "starting",
@@ -243,28 +205,8 @@ class MediaStreamer:
             "updated_at": time.time()
         }
 
-        # 1. Étape 1 : Si YouTube, essayer Cobalt Cloud Engine puis Invidious Stream Pool
+        # 1. Si c'est STRICTEMENT YouTube : Moteur Invidious Mirror Pool puis fallback yt-dlp
         if video_id:
-            quality = "720"
-            if format_selector and format_selector in ("1080", "720", "480", "360"):
-                quality = format_selector
-            
-            try:
-                if cls._download_via_cobalt_cloud(task_id, media_url, final_file, is_audio, quality):
-                    if os.path.exists(final_file) and os.path.getsize(final_file) > 1024:
-                        download_tasks[task_id].update({
-                            "status": "ready",
-                            "percent": 100,
-                            "filepath": final_file,
-                            "filesize": os.path.getsize(final_file),
-                            "updated_at": time.time()
-                        })
-                        return
-            except Exception as e:
-                if "DOWNLOAD_CANCELLED_BY_USER" in str(e):
-                    download_tasks[task_id].update({"status": "cancelled"})
-                    return
-
             try:
                 if cls._download_via_invidious_pool(task_id, video_id, final_file, is_audio):
                     if os.path.exists(final_file) and os.path.getsize(final_file) > 1024:
@@ -281,7 +223,7 @@ class MediaStreamer:
                     download_tasks[task_id].update({"status": "cancelled"})
                     return
 
-        # 2. Étape 2 : yt-dlp natif (marche en local et pour TikTok, Facebook, Instagram, Twitter/X, SoundCloud)
+        # 2. Pour TikTok, Facebook, Instagram, Twitter/X, SoundCloud et fallback général
         out_template = os.path.join(tmp_dir, f"getvideo_{task_id}.%(ext)s")
         ydl_opts = {
             'outtmpl': out_template,
@@ -290,6 +232,11 @@ class MediaStreamer:
             'noplaylist': True,
             'no_color': True,
             'progress_hooks': [cls.get_progress_hook(task_id)],
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['tv_embedded', 'android', 'ios', 'mweb'],
+                }
+            },
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8',

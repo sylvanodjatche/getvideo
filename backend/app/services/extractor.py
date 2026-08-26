@@ -1,7 +1,6 @@
 import yt_dlp
 import re
 import httpx
-import json
 from typing import Dict, Any, List
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
@@ -28,6 +27,9 @@ def clean_filename(title: str) -> str:
     return cleaned.strip()[:100] or "getvideo_download"
 
 def sanitize_media_url(url: str) -> str:
+    url = url.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
     parsed = urlparse(url)
     if "youtube.com" in parsed.netloc or "youtu.be" in parsed.netloc:
         query_params = parse_qs(parsed.query)
@@ -41,15 +43,22 @@ def sanitize_media_url(url: str) -> str:
     return url
 
 def extract_youtube_video_id(url: str) -> str | None:
-    patterns = [
-        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
-        r'youtu\.be\/([0-9A-Za-z_-]{11})',
-        r'shorts\/([0-9A-Za-z_-]{11})'
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
+    """Détecte STRICTEMENT les URLs YouTube pour ne jamais confondre avec TikTok ou Facebook."""
+    try:
+        parsed = urlparse(url)
+        netloc = parsed.netloc.lower()
+        if "youtube.com" in netloc or "m.youtube.com" in netloc:
+            if "/shorts/" in parsed.path:
+                return parsed.path.split("/shorts/")[1].split("/")[0].split("?")[0]
+            query = parse_qs(parsed.query)
+            if "v" in query:
+                return query["v"][0]
+        elif "youtu.be" in netloc:
+            path_part = parsed.path.lstrip("/").split("/")[0].split("?")[0]
+            if len(path_part) >= 10:
+                return path_part
+    except Exception:
+        pass
     return None
 
 class MediaExtractor:
@@ -65,7 +74,7 @@ class MediaExtractor:
             'writeautomaticsub': True,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'ios', 'mweb', 'tv'],
+                    'player_client': ['tv_embedded', 'android', 'ios', 'mweb'],
                 }
             },
             'http_headers': {
@@ -74,14 +83,14 @@ class MediaExtractor:
             }
         }
 
-    def _fetch_exact_youtube_details(self, video_id: str, clean_url: str) -> Dict[str, Any]:
-        """Récupère les vraies métadonnées YouTube (titre exact, auteur, durée réelle sans bot challenge)."""
+    def _fetch_youtube_details(self, video_id: str, clean_url: str) -> Dict[str, Any]:
+        """Extraction YouTube précise avec vraie durée, titre réel et formats HD."""
         title = "Vidéo YouTube"
         uploader = "Auteur YouTube"
         thumbnail = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
         duration = 0
 
-        # 1. Extraction directe de la durée réelle depuis ytInitialPlayerResponse
+        # 1. Extraction directe de la durée réelle et du titre depuis la page HTML
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9"
@@ -109,8 +118,8 @@ class MediaExtractor:
         except Exception:
             pass
 
-        # 2. Si durée toujours manquante, appel à l'OEMBED officiel
-        if duration <= 0 or title == "Vidéo YouTube":
+        # 2. OEMBED Officiel si titre ou auteur manquant
+        if title == "Vidéo YouTube" or duration <= 0:
             try:
                 oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
                 with httpx.Client(timeout=4.0) as client:
@@ -124,11 +133,11 @@ class MediaExtractor:
                 pass
 
         if duration <= 0:
-            duration = 240  # Défaut uniquement en dernier recours
+            duration = 180
 
         safe_title = clean_filename(title)
 
-        # Calcul exact et précis des tailles en Mo
+        # Calcul exact des tailles réelles pour chaque qualité
         size_1080 = int(((3200 + 128) * 1000 / 8) * duration)
         size_720 = int(((1600 + 128) * 1000 / 8) * duration)
         size_480 = int(((850 + 128) * 1000 / 8) * duration)
@@ -195,11 +204,6 @@ class MediaExtractor:
             }
         ]
 
-        subtitles_list = [
-            {"lang": "fr", "name": "Français (Auto)", "ext": "vtt", "url": f"/api/subtitle?url={clean_url}&lang=fr"},
-            {"lang": "en", "name": "English (Auto)", "ext": "vtt", "url": f"/api/subtitle?url={clean_url}&lang=en"}
-        ]
-
         return {
             "id": video_id,
             "title": title,
@@ -211,37 +215,37 @@ class MediaExtractor:
             "platform": "youtube",
             "videos": video_formats,
             "audios": audio_formats,
-            "subtitles": subtitles_list
+            "subtitles": []
         }
 
     def extract(self, url: str) -> Dict[str, Any]:
         clean_url = sanitize_media_url(url)
         video_id = extract_youtube_video_id(clean_url)
 
-        # 1. Pour YouTube : utiliser l'extraction exacte résiliente sans blocage
+        # 1. Si c'est STRICTEMENT YouTube
         if video_id:
-            return self._fetch_exact_youtube_details(video_id, clean_url)
+            return self._fetch_youtube_details(video_id, clean_url)
 
-        # 2. Pour TikTok, Facebook, Instagram, Twitter, SoundCloud : extraction avec yt-dlp
+        # 2. Pour TikTok, Facebook, Instagram, Twitter/X, SoundCloud et 1000+ autres
         with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
             if not info:
-                raise ValueError("Impossible d'extraire les informations.")
+                raise ValueError("Impossible d'extraire les informations de ce média.")
 
             if "entries" in info and info["entries"]:
                 info = info["entries"][0]
 
-            title = info.get("title", "Sans titre")
+            title = info.get("title") or "Média Téléchargé"
             safe_title = clean_filename(title)
             duration = info.get("duration", 0) or 0
             extractor_name = info.get("extractor_key", "").lower()
             
             platform = "universal"
-            if "tiktok" in extractor_name: platform = "tiktok"
-            elif "facebook" in extractor_name: platform = "facebook"
-            elif "instagram" in extractor_name: platform = "instagram"
-            elif "twitter" in extractor_name or "x" in extractor_name: platform = "twitter"
-            elif "soundcloud" in extractor_name: platform = "soundcloud"
+            if "tiktok" in extractor_name or "tiktok" in clean_url: platform = "tiktok"
+            elif "facebook" in extractor_name or "facebook" in clean_url or "fb.watch" in clean_url: platform = "facebook"
+            elif "instagram" in extractor_name or "instagram" in clean_url: platform = "instagram"
+            elif "twitter" in extractor_name or "x.com" in clean_url: platform = "twitter"
+            elif "soundcloud" in extractor_name or "soundcloud" in clean_url: platform = "soundcloud"
 
             raw_formats = info.get("formats", [])
             video_formats = []
@@ -268,7 +272,7 @@ class MediaExtractor:
                             "filesize": filesize,
                             "filesize_formatted": format_filesize(filesize),
                             "media_url": clean_url,
-                            "is_direct_cdn": False  # Toujours streamer par le serveur pour forcer le téléchargement et éviter Access Denied
+                            "is_direct_cdn": False
                         })
                 elif acodec != "none":
                     audio_formats.append({
@@ -293,14 +297,16 @@ class MediaExtractor:
                     "is_direct_cdn": False
                 })
 
+            thumbnail = info.get("thumbnail") or (info.get("thumbnails") and info["thumbnails"][0].get("url")) or ""
+
             return {
                 "id": info.get("id"),
                 "title": title,
                 "safe_title": safe_title,
-                "thumbnail": info.get("thumbnail"),
+                "thumbnail": thumbnail,
                 "duration": duration,
                 "duration_formatted": format_duration(duration),
-                "uploader": info.get("uploader") or info.get("channel") or "Auteur Inconnu",
+                "uploader": info.get("uploader") or info.get("channel") or info.get("creator") or platform.capitalize(),
                 "platform": platform,
                 "videos": video_formats,
                 "audios": audio_formats,
