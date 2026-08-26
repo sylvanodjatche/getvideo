@@ -572,14 +572,8 @@ document.addEventListener('DOMContentLoaded', () => {
             clearInterval(progressPollInterval);
         }
 
-        // Direct CDN Download (TikTok, Instagram, etc.)
-        if (isDirect && url) {
-            window.open(url, '_blank');
-            setTimeout(() => progressModal.classList.add('hidden'), 800);
-            return;
-        }
-
-        // Start Backend Task
+        // Tous les téléchargements passent par le moteur serveur avec suivi temps réel
+        // (Évite les blocages Access Denied sur TikTok et force le téléchargement sur Facebook)
         try {
             const startApiUrl = `/api/start_download?media_url=${encodeURIComponent(mediaUrl)}&format_id=${encodeURIComponent(formatId || '')}&title=${encodeURIComponent(title)}&ext=${ext}`;
             const startResp = await fetch(startApiUrl, { method: 'POST' });

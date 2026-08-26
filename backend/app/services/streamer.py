@@ -154,8 +154,60 @@ class MediaStreamer:
                         data = resp.json()
                         stream_url = data.get("url")
                         if stream_url:
-                            success = cls._download_stream_chunks(task_id, stream_url, final_file)
+                            temp_target = final_file
+                            if is_audio and not final_file.endswith(".mp3"):
+                                temp_target = final_file + ".tmp"
+                            
+                            success = cls._download_stream_chunks(task_id, stream_url, temp_target)
                             if success:
+                                if is_audio and temp_target != final_file:
+                                    cmd = ["ffmpeg", "-y", "-i", temp_target, "-vn", "-b:a", "320k", final_file]
+                                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                                    if os.path.exists(temp_target):
+                                        os.remove(temp_target)
+                                return True
+            except Exception:
+                continue
+        return False
+
+    @classmethod
+    def _download_via_invidious_pool(cls, task_id: str, video_id: str, final_file: str, is_audio: bool) -> bool:
+        """Télécharge le flux vidéo ou audio via le pool Invidious."""
+        invidious_endpoints = [
+            f"https://invidious.nerdvpn.de/api/v1/videos/{video_id}",
+            f"https://inv.tux.pizza/api/v1/videos/{video_id}",
+            f"https://invidious.jing.rocks/api/v1/videos/{video_id}",
+            f"https://vid.priv.au/api/v1/videos/{video_id}"
+        ]
+
+        for ep in invidious_endpoints:
+            try:
+                with httpx.Client(timeout=5.0, follow_redirects=True) as client:
+                    r = client.get(ep)
+                    if r.status_code == 200:
+                        data = r.json()
+                        formats = data.get("formatStreams") or data.get("adaptiveFormats") or []
+                        target_url = None
+
+                        if is_audio:
+                            for f in formats:
+                                if "audio" in f.get("type", "").lower() or "audio" in f.get("mimeType", "").lower():
+                                    target_url = f.get("url")
+                                    if target_url: break
+                        else:
+                            for f in formats:
+                                if "video" in f.get("type", "").lower() or "mp4" in f.get("type", "").lower():
+                                    target_url = f.get("url")
+                                    if target_url: break
+
+                        if target_url:
+                            temp_target = final_file + ".raw" if is_audio else final_file
+                            success = cls._download_stream_chunks(task_id, target_url, temp_target)
+                            if success:
+                                if is_audio:
+                                    cmd = ["ffmpeg", "-y", "-i", temp_target, "-vn", "-b:a", "320k", final_file]
+                                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                                    if os.path.exists(temp_target): os.remove(temp_target)
                                 return True
             except Exception:
                 continue
@@ -191,29 +243,45 @@ class MediaStreamer:
             "updated_at": time.time()
         }
 
-        # 1. Étape 1 : Si on est sur YouTube, tenter d'abord Cobalt pour contourner le blocage IP du datacenter
+        # 1. Étape 1 : Si YouTube, essayer Cobalt Cloud Engine puis Invidious Stream Pool
         if video_id:
+            quality = "720"
+            if format_selector and format_selector in ("1080", "720", "480", "360"):
+                quality = format_selector
+            
             try:
-                quality = "720"
-                if format_selector and format_selector in ("1080", "720", "480", "360"):
-                    quality = format_selector
-                
-                success = cls._download_via_cobalt_cloud(task_id, media_url, final_file, is_audio, quality)
-                if success and os.path.exists(final_file) and os.path.getsize(final_file) > 1024:
-                    download_tasks[task_id].update({
-                        "status": "ready",
-                        "percent": 100,
-                        "filepath": final_file,
-                        "filesize": os.path.getsize(final_file),
-                        "updated_at": time.time()
-                    })
-                    return
+                if cls._download_via_cobalt_cloud(task_id, media_url, final_file, is_audio, quality):
+                    if os.path.exists(final_file) and os.path.getsize(final_file) > 1024:
+                        download_tasks[task_id].update({
+                            "status": "ready",
+                            "percent": 100,
+                            "filepath": final_file,
+                            "filesize": os.path.getsize(final_file),
+                            "updated_at": time.time()
+                        })
+                        return
             except Exception as e:
                 if "DOWNLOAD_CANCELLED_BY_USER" in str(e):
                     download_tasks[task_id].update({"status": "cancelled"})
                     return
 
-        # 2. Étape 2 : yt-dlp natif (marche en local et pour TikTok, Instagram, Twitter, etc.)
+            try:
+                if cls._download_via_invidious_pool(task_id, video_id, final_file, is_audio):
+                    if os.path.exists(final_file) and os.path.getsize(final_file) > 1024:
+                        download_tasks[task_id].update({
+                            "status": "ready",
+                            "percent": 100,
+                            "filepath": final_file,
+                            "filesize": os.path.getsize(final_file),
+                            "updated_at": time.time()
+                        })
+                        return
+            except Exception as e:
+                if "DOWNLOAD_CANCELLED_BY_USER" in str(e):
+                    download_tasks[task_id].update({"status": "cancelled"})
+                    return
+
+        # 2. Étape 2 : yt-dlp natif (marche en local et pour TikTok, Facebook, Instagram, Twitter/X, SoundCloud)
         out_template = os.path.join(tmp_dir, f"getvideo_{task_id}.%(ext)s")
         ydl_opts = {
             'outtmpl': out_template,
@@ -222,11 +290,6 @@ class MediaStreamer:
             'noplaylist': True,
             'no_color': True,
             'progress_hooks': [cls.get_progress_hook(task_id)],
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['tv_embedded', 'android', 'ios', 'mweb'],
-                }
-            },
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8',
@@ -240,8 +303,6 @@ class MediaStreamer:
                 'preferredcodec': 'mp3',
                 'preferredquality': '320',
             }]
-        elif target_ext == "m4a":
-            ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
         else:
             selector = format_selector or "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
             if selector in ("1080", "720", "480", "360"):
