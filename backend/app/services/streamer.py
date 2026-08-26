@@ -223,7 +223,7 @@ class MediaStreamer:
                     download_tasks[task_id].update({"status": "cancelled"})
                     return
 
-        # 2. Pour TikTok, Facebook, Instagram, Twitter/X, SoundCloud et fallback général
+        # 2. Pour Facebook, TikTok, Instagram, Twitter/X, SoundCloud et fallback général
         out_template = os.path.join(tmp_dir, f"getvideo_{task_id}.%(ext)s")
         ydl_opts = {
             'outtmpl': out_template,
@@ -254,6 +254,10 @@ class MediaStreamer:
             selector = format_selector or "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
             if selector in ("1080", "720", "480", "360"):
                 selector = f"bestvideo[height<={selector}]+bestaudio/best[height<={selector}]/best"
+            elif "+bestaudio" not in selector and selector != "best":
+                # Fusion automatique du flux audio pour Facebook / TikTok
+                selector = f"{selector}+bestaudio/best"
+            
             ydl_opts['format'] = selector
             ydl_opts['merge_output_format'] = 'mp4'
 

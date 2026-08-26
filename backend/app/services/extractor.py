@@ -43,7 +43,6 @@ def sanitize_media_url(url: str) -> str:
     return url
 
 def extract_youtube_video_id(url: str) -> str | None:
-    """Détecte STRICTEMENT les URLs YouTube pour ne jamais confondre avec TikTok ou Facebook."""
     try:
         parsed = urlparse(url)
         netloc = parsed.netloc.lower()
@@ -264,8 +263,10 @@ class MediaExtractor:
                     res_label = f"{height}p" if height else "HD"
                     if res_label not in seen_res:
                         seen_res.add(res_label)
+                        # TOUJOURS inclure +bestaudio/best pour garantir que Facebook et TikTok ont du son !
+                        merged_selector = f"{f_id}+bestaudio/best" if acodec == "none" else f_id
                         video_formats.append({
-                            "format_id": f_id,
+                            "format_id": merged_selector,
                             "type": "video",
                             "ext": ext,
                             "quality": f"{res_label}",
@@ -288,7 +289,7 @@ class MediaExtractor:
 
             if not video_formats:
                 video_formats.append({
-                    "format_id": "best",
+                    "format_id": "bestvideo+bestaudio/best",
                     "type": "video",
                     "ext": "mp4",
                     "quality": "Haute Définition (HD)",
